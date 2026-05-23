@@ -748,7 +748,17 @@ io.on('connection', (socket) => {
     if (allAnswered && (room.state === 'playing' || room.state === 'ready')) {
       endRoundAnswering(code);
     } else {
-      broadcastRoom(code);
+      // broadcastRoom yapma! Sadece "X cevap verdi" durumunu yolla
+      io.to(code).emit('player_answered', {
+        playerId: player.id,
+        playerName: player.name,
+        scoreboard: room.players.map(p => ({
+          id: p.id, name: p.name, avatar: p.avatar, score: p.score,
+          jokersLeft: p.jokersLeft, connected: p.connected,
+          hasAnswered: room.answers[p.id] !== undefined,
+          typing: p.typing || false,
+        })),
+      });
     }
     cb && cb({ ok: true });
   });
@@ -760,7 +770,16 @@ io.on('connection', (socket) => {
     if (room.state !== 'playing') return;
     delete room.answers[socket.id];
     delete room.answerTimes[socket.id];
-    broadcastRoom(code);
+    // broadcastRoom yapma, sadece kendi durumumu güncelle
+    io.to(code).emit('player_unanswered', {
+      playerId: socket.id,
+      scoreboard: room.players.map(p => ({
+        id: p.id, name: p.name, avatar: p.avatar, score: p.score,
+        jokersLeft: p.jokersLeft, connected: p.connected,
+        hasAnswered: room.answers[p.id] !== undefined,
+        typing: p.typing || false,
+      })),
+    });
   });
 
   socket.on('show_results', () => {
@@ -869,7 +888,8 @@ io.on('connection', (socket) => {
     const p = room.players.find(p => p.id === socket.id);
     if (!p) return;
     p.typing = !!isTyping;
-    broadcastRoom(code);
+    // broadcastRoom yapma! Sadece typing event'i yolla (DOM resetlenmesin)
+    socket.to(code).emit('typing_update', { playerId: socket.id, typing: !!isTyping });
   });
 
   socket.on('daily_get', (cb) => {
