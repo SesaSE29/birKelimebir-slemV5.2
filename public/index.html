@@ -1051,28 +1051,32 @@ const PRESET_LIMITS = {
 };
 
 function applyPresetLimits(preset) {
-  const lim = PRESET_LIMITS[preset] || PRESET_LIMITS.normal;
-  function filterSelect(id, allowed) {
-    const el = $(id);
-    if (!el) return;
-    const currentVal = el.value;
-    Array.from(el.options).forEach(opt => {
-      opt.disabled = !allowed.includes(parseInt(opt.value));
-      opt.style.display = allowed.includes(parseInt(opt.value)) ? '' : 'none';
-    });
-    // Mevcut değer geçerli değilse en yakın geçerli olana ayarla
-    if (!allowed.includes(parseInt(currentVal))) {
-      el.value = allowed[0];
+  try {
+    const lim = PRESET_LIMITS[preset] || PRESET_LIMITS.normal;
+    function filterSelect(id, allowed) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      Array.from(el.options).forEach(opt => {
+        const v = parseInt(opt.value);
+        const ok = allowed.includes(v);
+        opt.disabled = !ok;
+        opt.hidden = !ok;
+      });
+      const currentVal = parseInt(el.value);
+      if (!allowed.includes(currentVal) && allowed.length > 0) {
+        el.value = String(allowed[0]);
+      }
     }
+    filterSelect('setting-rounds', lim.rounds);
+    filterSelect('setting-time-word', lim.wordTimes);
+    filterSelect('setting-time-math', lim.mathTimes);
+    ['setting-rounds','setting-time-word','setting-time-math'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.disabled = !!lim.locked;
+    });
+  } catch (e) {
+    console.error('applyPresetLimits hatası:', e);
   }
-  filterSelect('setting-rounds', lim.rounds);
-  filterSelect('setting-time-word', lim.wordTimes);
-  filterSelect('setting-time-math', lim.mathTimes);
-  // Eğer kilitli ise (düello), select'leri disabled yap
-  ['setting-rounds','setting-time-word','setting-time-math'].forEach(id => {
-    const el = $(id);
-    if (el) el.disabled = lim.locked;
-  });
 }
 
 function startGame() { if (isHost) socket.emit('start_game'); }
@@ -1202,22 +1206,32 @@ function renderByState(prevState) {
     if (isHost) {
       $('host-settings').style.display = '';
       $('guest-wait').style.display = 'none';
-      // Select değerlerini sadece focus'ta değilse güncelle (kullanıcı ayar yaparken bozulmasın)
       const active = document.activeElement;
       const safeSet = (id, val) => {
-        const el = $(id);
-        if (el && el !== active && el.value != val) el.value = val;
+        try {
+          const el = document.getElementById(id);
+          if (!el) return;
+          if (el === active) return; // focus'taysa dokunma
+          const newVal = String(val);
+          if (el.value !== newVal) {
+            // Önce option'ı aktif et (filtrelenmişse), sonra set
+            const opt = Array.from(el.options).find(o => o.value === newVal);
+            if (opt) opt.hidden = false, opt.disabled = false;
+            el.value = newVal;
+          }
+        } catch(e) { console.warn('safeSet hatası', id, e); }
       };
+      // Önce preset limitlerini uygula (option'ları filtrele)
+      applyPresetLimits(roomState.settings.preset || 'normal');
+      // Sonra değerleri set et
+      safeSet('setting-preset', roomState.settings.preset || 'normal');
       safeSet('setting-rounds', roomState.settings.rounds);
       safeSet('setting-time-word', roomState.settings.timeLimitWord);
       safeSet('setting-time-math', roomState.settings.timeLimitMath);
       safeSet('setting-joker', roomState.settings.jokersPerPlayer);
       safeSet('setting-order', roomState.settings.order);
       safeSet('setting-mode', roomState.settings.gameMode || 'mixed');
-      safeSet('setting-preset', roomState.settings.preset || 'normal');
       $('order-field').style.display = (roomState.settings.gameMode === 'mixed' ? '' : 'none');
-      // Preset bazlı kısıtlamalar göster
-      applyPresetLimits(roomState.settings.preset || 'normal');
     } else {
       $('host-settings').style.display = 'none';
       $('guest-wait').style.display = '';
@@ -1289,34 +1303,40 @@ function renderGameRound(prevState) {
     lastSecondsWarned = false;
   }
 
+  // Tile'ları SADECE yeni tur olduğunda yeniden çiz, aksi halde dokunma
   const tilesArea = $('tiles-area');
-  tilesArea.innerHTML = '';
-  const animClass = isNewRound ? ' wheel-anim' : '';
-  if (roomState.roundType === 'word' && roomState.letters) {
-    roomState.letters.forEach((l, i) => {
-      const t = document.createElement('div');
-      t.className = 'tile' + animClass;
-      if (roomState.requiredLetter && l === roomState.requiredLetter) t.classList.add('required');
-      t.textContent = l;
-      t.style.cursor = 'default';
-      if (isNewRound) t.style.animationDelay = (i*0.08)+'s';
-      tilesArea.appendChild(t);
-    });
-  } else if (roomState.roundType === 'math' && roomState.numbers) {
-    roomState.numbers.forEach((n, i) => {
-      const t = document.createElement('div');
-      t.className = 'tile number' + animClass;
-      t.textContent = n;
-      t.style.cursor = 'default';
-      if (isNewRound) t.style.animationDelay = (i*0.08)+'s';
-      tilesArea.appendChild(t);
-    });
-    const sep = document.createElement('div'); sep.style.cssText='width:100%;height:6px'; tilesArea.appendChild(sep);
-    const tgt = document.createElement('div');
-    tgt.className = 'tile target' + animClass;
-    tgt.textContent = roomState.target;
-    if (isNewRound) tgt.style.animationDelay = '0.5s';
-    tilesArea.appendChild(tgt);
+  if (isNewRound) {
+    tilesArea.innerHTML = '';
+    if (roomState.roundType === 'word' && roomState.letters) {
+      roomState.letters.forEach((l, i) => {
+        const t = document.createElement('div');
+        t.className = 'tile wheel-anim';
+        if (roomState.requiredLetter && l === roomState.requiredLetter) t.classList.add('required');
+        t.textContent = l;
+        t.style.cursor = 'default';
+        t.style.animationDelay = (i*0.08)+'s';
+        tilesArea.appendChild(t);
+      });
+    } else if (roomState.roundType === 'math' && roomState.numbers) {
+      roomState.numbers.forEach((n, i) => {
+        const t = document.createElement('div');
+        t.className = 'tile number wheel-anim';
+        t.textContent = n;
+        t.style.cursor = 'default';
+        t.style.animationDelay = (i*0.08)+'s';
+        tilesArea.appendChild(t);
+      });
+      const sep = document.createElement('div'); sep.style.cssText='width:100%;height:6px'; tilesArea.appendChild(sep);
+      const tgt = document.createElement('div');
+      tgt.className = 'tile target wheel-anim';
+      tgt.textContent = roomState.target;
+      tgt.style.animationDelay = '0.5s';
+      tilesArea.appendChild(tgt);
+    }
+    // Animasyonu sadece bir kere oynatıp class'ı çıkar (yeni eklenirse bile re-animate olmasın)
+    setTimeout(() => {
+      tilesArea.querySelectorAll('.wheel-anim').forEach(el => el.classList.remove('wheel-anim'));
+    }, 1200);
   }
 
   const maxTime = roomState.roundType === 'word' ? roomState.settings.timeLimitWord : roomState.settings.timeLimitMath;
