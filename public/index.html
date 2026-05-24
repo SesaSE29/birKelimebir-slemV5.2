@@ -507,7 +507,7 @@
           </select>
         </div>
       </div>
-      <div class="row" id="other-settings2" style="display:none">
+      <div class="row" id="other-settings2">
         <div class="field">
           <label>Mod</label>
           <select id="setting-mode" onchange="sendSettings()">
@@ -533,7 +533,6 @@
           </select>
         </div>
       </div>
-      <button class="btn ghost sm" id="btn-toggle-advanced" style="width:auto;margin:8px auto;display:block;">⚙ Gelişmiş Ayarlar</button>
       <button class="btn big" onclick="startGame()">Oyunu Başlat ▶</button>
     </div>
     <div class="card" id="guest-wait" style="display:none">
@@ -2294,9 +2293,6 @@ function renderAvatarPicker() {
 // ============== INIT ==============
 window.addEventListener('load', () => {
   loadTheme();
-  // Gelismis ayarlar tusuna event listener bagla (inline onclick yerine guvenli)
-  const advBtn = document.getElementById('btn-toggle-advanced');
-  if (advBtn) advBtn.addEventListener('click', toggleAdvanced);
   // Saved name & avatar
   const savedName = localStorage.getItem('bkbi_name');
   if (savedName) $('player-name').value = savedName;
