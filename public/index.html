@@ -533,7 +533,7 @@
           </select>
         </div>
       </div>
-      <button class="btn ghost sm" onclick="toggleAdvanced()" style="width:auto;margin:8px auto;display:block;">⚙ Gelişmiş Ayarlar</button>
+      <button class="btn ghost sm" id="btn-toggle-advanced" style="width:auto;margin:8px auto;display:block;">⚙ Gelişmiş Ayarlar</button>
       <button class="btn big" onclick="startGame()">Oyunu Başlat ▶</button>
     </div>
     <div class="card" id="guest-wait" style="display:none">
@@ -704,7 +704,10 @@
         <div><b>Esc:</b> Sil/Temizle</div>
         <div><b>F:</b> Tam ekran aç/kapat</div>
       </div>
-      <button class="btn ghost big" onclick="show('screen-home')" style="margin-top:16px">← Ana Sayfa</button>
+      <div class="controls" style="margin-top:16px;">
+        <button class="btn ghost big" onclick="goBack()">← Geri</button>
+        <button class="btn ghost big" onclick="show('screen-home')">🏠 Ana Sayfa</button>
+      </div>
     </div>
   </section>
 </div>
@@ -750,9 +753,24 @@ const PROVERBS = [
 
 // ============== HELPERS ==============
 const $ = id => document.getElementById(id);
-function show(id) {
+let screenHistory = [];
+function show(id, skipHistory) {
+  const currentActive = document.querySelector('.screen.active');
+  if (currentActive && !skipHistory && currentActive.id !== id) {
+    screenHistory.push(currentActive.id);
+    if (screenHistory.length > 10) screenHistory.shift();
+  }
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
-  $(id).classList.add('active');
+  const target = document.getElementById(id);
+  if (target) target.classList.add('active');
+}
+function goBack() {
+  if (screenHistory.length > 0) {
+    const prev = screenHistory.pop();
+    show(prev, true);
+  } else {
+    show('screen-home', true);
+  }
 }
 function notify(msg, type) {
   const area = $('notify-area');
@@ -1344,6 +1362,11 @@ function renderGameRound(prevState) {
   const me = roomState.players.find(p => p.id === myId);
   const iHaveAnswered = me && me.hasAnswered;
 
+  // Yeni tur basladiginda play-area ve post-answer'i temizle (eski tile'lar kalmasin)
+  if (isNewRound) {
+    $('play-area').innerHTML = '';
+    $('post-answer').innerHTML = '';
+  }
   if (roomState.state === 'ready') {
     $('host-pre').style.display = isHost ? '' : 'none';
     $('guest-pre').style.display = isHost ? 'none' : '';
@@ -2271,6 +2294,9 @@ function renderAvatarPicker() {
 // ============== INIT ==============
 window.addEventListener('load', () => {
   loadTheme();
+  // Gelismis ayarlar tusuna event listener bagla (inline onclick yerine guvenli)
+  const advBtn = document.getElementById('btn-toggle-advanced');
+  if (advBtn) advBtn.addEventListener('click', toggleAdvanced);
   // Saved name & avatar
   const savedName = localStorage.getItem('bkbi_name');
   if (savedName) $('player-name').value = savedName;
