@@ -309,6 +309,7 @@
   .daily-card { background: rgba(157,78,221,0.05); border: 1px solid rgba(157,78,221,0.3); }
   /* AVATAR PICKER */
   .avatar-picker { display: grid; grid-template-columns: repeat(8, 1fr); gap: 6px; margin: 8px 0; }
+  @media (max-width: 500px) { .avatar-picker { grid-template-columns: repeat(6, 1fr); } }
   .avatar-pick { background: var(--bg); border: 2px solid transparent; border-radius: 8px; padding: 8px; font-size: 1.4rem; text-align: center; cursor: pointer; transition: all 0.15s; }
   .avatar-pick:hover { background: var(--tile-hi); }
   .avatar-pick.selected { border-color: var(--gold); background: var(--tile-hi); }
@@ -462,27 +463,17 @@
     </div>
     <div class="card" id="host-settings" style="display:none">
       <h3>Oyun Ayarları</h3>
-      <div class="row">
-        <div class="field">
-          <label>Şablon</label>
-          <select id="setting-preset" onchange="changePreset()">
-            <option value="normal" selected>Normal</option>
-            <option value="duel">⚔ Düello</option>
-            <option value="fast">⚡ Hızlı</option>
-            <option value="marathon">🏃 Maraton</option>
-          </select>
-          <div id="preset-info" style="color:var(--muted);font-size:0.8rem;margin-top:6px;font-family:'JetBrains Mono',monospace;"></div>
-        </div>
-      </div>
-      <div class="row" id="other-settings">
+<div class="row" id="other-settings">
         <div class="field">
           <label>Tur Sayısı</label>
           <select id="setting-rounds" onchange="sendSettings()">
+            <option value="2">2</option>
             <option value="3">3</option>
             <option value="4">4</option>
             <option value="6" selected>6</option>
             <option value="8">8</option>
             <option value="10">10</option>
+            <option value="15">15</option>
             <option value="20">20</option>
           </select>
         </div>
@@ -520,7 +511,6 @@
           <label>Sıra</label>
           <select id="setting-order" onchange="sendSettings()">
             <option value="alternate" selected>Dönüşümlü</option>
-            <option value="word-first">Kelime 1.</option>
             <option value="random">Rastgele</option>
           </select>
         </div>
@@ -532,6 +522,18 @@
             <option value="2">2</option>
           </select>
         </div>
+      </div>
+      <div class="field" style="margin-top:8px;">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+          <input type="checkbox" id="setting-autostart" style="width:auto;margin:0;" onchange="sendSettings()">
+          <span>Otomatik tur başlatma <span style="color:var(--muted);font-size:0.8rem;">(her tur 3sn sonra otomatik başlasın)</span></span>
+        </label>
+      </div>
+      <div class="field">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+          <input type="checkbox" id="setting-finalround" style="width:auto;margin:0;" onchange="sendSettings()">
+          <span>🏁 Final tur <span style="color:var(--muted);font-size:0.8rem;">(son tur: 9 harfli kelime, +5 bonus)</span></span>
+        </label>
       </div>
       <button class="btn big" onclick="startGame()">Oyunu Başlat ▶</button>
     </div>
@@ -1101,6 +1103,39 @@ function sendEmoji(emoji) {
   socket.emit('emoji', { emoji, targetId });
 }
 
+
+// TDK kelime anlamlari (sonuc ekrani icin)
+async function loadWordMeanings(results) {
+  for (const r of results) {
+    if (!r.word) continue;
+    const w = r.word.toLocaleLowerCase('tr-TR');
+    try {
+      // Cache'te varsa kullan
+      let meaning = null;
+      if (window._meaningCache && window._meaningCache[w]) {
+        meaning = window._meaningCache[w];
+      } else {
+        const res = await fetch('https://sozluk.gov.tr/gts?ara=' + encodeURIComponent(w), { mode: 'cors' });
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data) && data.length > 0 && data[0].anlamlarListe && data[0].anlamlarListe.length > 0) {
+            meaning = data[0].anlamlarListe[0].anlam || '';
+            if (meaning.length > 60) meaning = meaning.slice(0, 57) + '...';
+            window._meaningCache = window._meaningCache || {};
+            window._meaningCache[w] = meaning;
+          }
+        }
+      }
+      if (meaning) {
+        document.querySelectorAll('.word-meaning[data-word="' + w + '"]').forEach(el => {
+          el.textContent = '↳ ' + meaning;
+          el.style.display = 'block';
+        });
+      }
+    } catch (e) {}
+  }
+}
+
 // Hafif guncellemeler icin handler'lar (DOM'u tamamen yenilemiyor)
 socket.on('typing_update', ({ playerId, typing }) => {
   if (!roomState) return;
@@ -1240,14 +1275,8 @@ function renderByState(prevState) {
     if (isHost) {
       $('host-settings').style.display = '';
       $('guest-wait').style.display = 'none';
-      // Ayar sayfası sadece görüntüleniyor, user interaction sırasında güncelleme yapma
-      // (sendSettings socket'i aracılığıyla server güncelliyor, room_state feedback loop'u kırıyor)
-      // Sadece preset'i kontrol et, diğerlerini sakın dokunma
-      const p = $('setting-preset');
-      if (p && p.value !== (roomState.settings.preset || 'normal')) {
-        p.value = roomState.settings.preset || 'normal';
-        changePreset(); // UI'ı güncelle ama sendSettings çağırma
-      }
+      // Ayar sayfasi sadece goruntuleniyor, user interaction'da room_state feedback'i bozmasin
+      // Hicbir select'e dokunma - kullanici neyle ugrasiyorsa o oradadir
     } else {
       $('host-settings').style.display = 'none';
       $('guest-wait').style.display = '';
@@ -1301,7 +1330,11 @@ let lastRoundData = null;
 
 function renderGameRound(prevState) {
   $('round-label').textContent = `Tur ${roomState.currentRound + 1} / ${roomState.totalRounds}`;
-  $('round-type-label').textContent = roomState.roundType === 'word' ? '🔤 Bir Kelime' : '🔢 Bir İşlem';
+  if (roomState.roundType === 'final') {
+    $('round-type-label').textContent = '🏁 FİNAL TURU — 9 Harfli Kelime (+5 bonus)';
+  } else {
+    $('round-type-label').textContent = roomState.roundType === 'word' ? '🔤 Bir Kelime' : '🔢 Bir İşlem';
+  }
 
   // Bonus banner
   $('bonus-banner-slot').innerHTML = roomState.isBonus ? '<div class="bonus-banner">⭐ BONUS TUR • PUANLAR x2 ⭐</div>' : '';
@@ -1323,7 +1356,7 @@ function renderGameRound(prevState) {
   const tilesArea = $('tiles-area');
   if (isNewRound) {
     tilesArea.innerHTML = '';
-    if (roomState.roundType === 'word' && roomState.letters) {
+    if ((roomState.roundType === 'word' || roomState.roundType === 'final') && roomState.letters) {
       roomState.letters.forEach((l, i) => {
         const t = document.createElement('div');
         t.className = 'tile wheel-anim';
@@ -1355,7 +1388,7 @@ function renderGameRound(prevState) {
     }, 1200);
   }
 
-  const maxTime = roomState.roundType === 'word' ? roomState.settings.timeLimitWord : roomState.settings.timeLimitMath;
+  const maxTime = (roomState.roundType === 'word' || roomState.roundType === 'final') ? roomState.settings.timeLimitWord : roomState.settings.timeLimitMath;
   updateTimerDisplay(roomState.timeLeft, maxTime);
 
   const me = roomState.players.find(p => p.id === myId);
@@ -1426,7 +1459,7 @@ function updateTimerDisplay(t, max) {
 
 socket.on('tick', ({ timeLeft }) => {
   if (roomState) roomState.timeLeft = timeLeft;
-  const maxTime = roomState.roundType === 'word' ? roomState.settings.timeLimitWord : roomState.settings.timeLimitMath;
+  const maxTime = (roomState.roundType === 'word' || roomState.roundType === 'final') ? roomState.settings.timeLimitWord : roomState.settings.timeLimitMath;
   updateTimerDisplay(timeLeft, maxTime);
   // Son saniyeler uyarısı
   if (timeLeft === 5 && !lastSecondsWarned) {
@@ -1472,7 +1505,7 @@ function renderScoreboard(target) {
 
 function renderPlayArea() {
   const area = $('play-area');
-  if (roomState.roundType === 'word') renderWordBuilder(area);
+  if (roomState.roundType === 'word' || roomState.roundType === 'final') renderWordBuilder(area);
   else renderExpressionBuilder(area);
 }
 
@@ -1882,8 +1915,15 @@ function exprSubmit() {
   });
 }
 
-socket.on('round_results', ({ results, roundType, target, bestAnswer, requiredLetter, isBonus, scoreboard }) => {
-  $('results-title').textContent = `Tur ${roomState.currentRound + 1} Sonuçları${isBonus ? ' ⭐ BONUS' : ''}`;
+socket.on('round_results', ({ results, roundType, target, bestAnswer, requiredLetter, isBonus, isFinal, topWords, roundEmoji, scoreboard }) => {
+  let titleSuffix = '';
+  if (isFinal) titleSuffix = ' 🏁 FİNAL';
+  else if (isBonus) titleSuffix = ' ⭐ BONUS';
+  $('results-title').innerHTML = `Tur ${roomState.currentRound + 1} Sonuçları${titleSuffix} <span style="font-size:1.5em;margin-left:8px;">${roundEmoji || ''}</span>`;
+  // Async TDK anlamlarini getir
+  if (roundType === 'word' || isFinal) {
+    setTimeout(() => loadWordMeanings(results), 500);
+  }
   const list = $('results-list');
   list.innerHTML = '';
   results.forEach(r => {
@@ -1891,7 +1931,7 @@ socket.on('round_results', ({ results, roundType, target, bestAnswer, requiredLe
     row.className = 'result-line';
     if (r.points > 0) row.classList.add('celebrate');
     let detail = '';
-    if (roundType === 'word') {
+    if (roundType === 'word' || isFinal) {
       let badge = '';
       if (r.tdkValid) badge = '<span class="badge ok">TDK ✓</span>';
       else if (r.tdkUnknown) badge = '<span class="badge unk">TDK ?</span>';
@@ -1900,7 +1940,9 @@ socket.on('round_results', ({ results, roundType, target, bestAnswer, requiredLe
       const speed = r.speedBonus > 0 ? '<span class="badge speed">⚡ +2</span>' : '';
       const bonus = r.isBonus && r.points > 0 ? '<span class="badge bonus">x2</span>' : '';
       const missing = r.missingRequired ? '<span class="badge no">⚠ zorunlu harf yok</span>' : '';
-      detail = `${r.word ? escapeHtml(r.word) : '<i style="color:var(--muted)">—</i>'} ${badge}${j}${speed}${bonus}${missing}`;
+      const finalB = r.finalBonus ? '<span class="badge bonus">🏁 +5</span>' : '';
+      const meaningId = r.word ? 'meaning-' + (r.word.toLowerCase().replace(/[^a-z]/g,'')) + '-' + Math.random().toString(36).slice(2,6) : '';
+      detail = `${r.word ? '<span class="result-word" data-word="'+escapeHtml(r.word)+'" data-meaning-id="'+meaningId+'">'+escapeHtml(r.word)+'</span>' : '<i style="color:var(--muted)">—</i>'} ${badge}${j}${speed}${bonus}${missing}${finalB}`;
     } else {
       if (r.result !== undefined) {
         const exprTxt = r.expression || '';
@@ -1909,16 +1951,26 @@ socket.on('round_results', ({ results, roundType, target, bestAnswer, requiredLe
         detail = `${r.result} ${r.diff === 0 ? '🎯' : '(fark:'+r.diff+')'} ${speed}${bonus} <span style="color:var(--muted);font-size:0.8em;">${escapeHtml(exprTxt)}</span>`;
       } else detail = '<i style="color:var(--muted)">(boş)</i>';
     }
-    row.innerHTML = `<span><b>${escapeHtml(r.name)}:</b> ${detail}</span><span class="pts">+${r.points}</span>`;
+    row.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;width:100%;"><span><b>${escapeHtml(r.name)}:</b> ${detail}</span><span class="pts">+${r.points}</span></div>`;
+    // Anlam icin alt div
+    if (r.word && (roundType === 'word' || isFinal)) {
+      const meaningDiv = document.createElement('div');
+      meaningDiv.className = 'word-meaning';
+      meaningDiv.dataset.word = r.word.toLocaleLowerCase('tr-TR');
+      meaningDiv.style.cssText = 'font-size:0.75rem;color:var(--muted);font-style:italic;margin-top:2px;padding-left:8px;display:none;';
+      row.appendChild(meaningDiv);
+    }
     list.appendChild(row);
   });
   const bestArea = $('best-answer-area');
   bestArea.innerHTML = '';
-  if (bestAnswer) {
+  if (bestAnswer || (topWords && topWords.length > 0)) {
     const box = document.createElement('div');
     box.className = 'best-answer-box';
-    if (roundType === 'word') {
-      box.innerHTML = `<div class="label">★ En Uzun Bulunabilir Kelime${requiredLetter ? ' ('+requiredLetter+' içeren)' : ''}</div><div class="value">${escapeHtml(bestAnswer.toUpperCase())} (${[...bestAnswer].length} harf)</div>`;
+    if (roundType === 'word' || isFinal) {
+      const words = (topWords && topWords.length > 0) ? topWords : [bestAnswer];
+      const wordList = words.filter(w => w).map(w => `<div style="margin:2px 0;">${escapeHtml(w.toUpperCase())} <span style="color:var(--muted);font-size:0.8em;">(${[...w].length} harf)</span></div>`).join('');
+      box.innerHTML = `<div class="label">★ En Uzun ${words.length} Kelime${requiredLetter ? ' ('+requiredLetter+' içeren)' : ''}</div><div class="value" style="font-size:1.2rem;line-height:1.4;">${wordList}</div>`;
     } else {
       const exprStr = bestAnswer.map(s => `${s.a}${opSym(s.op)}${s.b}=${s.result}`).join(' → ');
       box.innerHTML = `<div class="label">★ Bir Doğru Çözüm</div><div class="value">${escapeHtml(exprStr)}</div>`;
@@ -1963,9 +2015,14 @@ socket.on('game_finished', ({ ranking, history }) => {
       let title, bestStr;
       const bonusFlag = h.isBonus ? ' ⭐ BONUS' : '';
       const reqFlag = h.requiredLetter ? ` [zorunlu: ${h.requiredLetter}]` : '';
-      if (h.roundType === 'word') {
-        title = `Tur ${h.roundNum}${bonusFlag}${reqFlag} • ${h.letters ? h.letters.join(' ') : ''}`;
-        bestStr = h.bestAnswer ? `★ En uzun: ${h.bestAnswer.toUpperCase()} (${[...h.bestAnswer].length} harf)` : '';
+      if (h.roundType === 'word' || h.roundType === 'final' || h.isFinal) {
+        const finalLbl = (h.roundType === 'final' || h.isFinal) ? ' 🏁 FİNAL' : '';
+        title = `Tur ${h.roundNum}${bonusFlag}${finalLbl}${reqFlag} • ${h.letters ? h.letters.join(' ') : ''}`;
+        if (h.topWords && h.topWords.length > 0) {
+          bestStr = '★ En uzun: ' + h.topWords.map(w => w.toUpperCase()).join(', ');
+        } else if (h.bestAnswer) {
+          bestStr = `★ En uzun: ${h.bestAnswer.toUpperCase()} (${[...h.bestAnswer].length} harf)`;
+        } else bestStr = '';
       } else {
         title = `Tur ${h.roundNum}${bonusFlag} • İşlem: ${h.numbers ? h.numbers.join(' ') : ''} → ${h.target}`;
         if (h.bestAnswer) {
@@ -2193,7 +2250,7 @@ document.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
       // Cevap onaylama (kelime veya işlem)
       if (roomState && roomState.state === 'playing') {
-        if (roomState.roundType === 'word' && $('wb-submit-btn') && !$('wb-submit-btn').disabled) {
+        if ((roomState.roundType === 'word' || roomState.roundType === 'final') && $('wb-submit-btn') && !$('wb-submit-btn').disabled) {
           wbSubmit();
         } else if (roomState.roundType === 'math' && $('expr-submit-btn') && !$('expr-submit-btn').disabled) {
           exprSubmit();
@@ -2209,14 +2266,14 @@ document.addEventListener('keydown', (e) => {
     }
   } else if (e.key === 'Enter') {
     if (roomState && roomState.state === 'playing') {
-      if (roomState.roundType === 'word' && $('wb-submit-btn') && !$('wb-submit-btn').disabled) wbSubmit();
+      if ((roomState.roundType === 'word' || roomState.roundType === 'final') && $('wb-submit-btn') && !$('wb-submit-btn').disabled) wbSubmit();
       else if (roomState.roundType === 'math' && $('expr-submit-btn') && !$('expr-submit-btn').disabled) exprSubmit();
     } else if (roomState && roomState.state === 'results' && isHost && $('next-round-btn') && !$('next-round-btn').disabled) {
       hostNextRound();
     }
   } else if (e.key === 'Escape') {
     if (roomState && roomState.state === 'playing') {
-      if (roomState.roundType === 'word') wbClear();
+      if (roomState.roundType === 'word' || roomState.roundType === 'final') wbClear();
       else exprReset();
     }
   } else if (e.key.toLowerCase() === 'f') {

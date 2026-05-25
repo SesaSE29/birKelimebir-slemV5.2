@@ -93,6 +93,57 @@ function findLongestPossibleWord(letters, requiredLetter = null) {
   return null;
 }
 
+// En uzun 3 farkli kelimeyi bul
+function findTopWords(letters, requiredLetter = null, count = 3) {
+  if (WORD_LIST.length === 0) return [];
+  const pool = {};
+  letters.forEach(l => {
+    const lo = l.toLocaleLowerCase('tr-TR');
+    pool[lo] = (pool[lo] || 0) + 1;
+  });
+  const reqLo = requiredLetter ? requiredLetter.toLocaleLowerCase('tr-TR') : null;
+  const found = [];
+  const foundSet = new Set();
+  for (let len = 9; len >= 4 && found.length < count; len--) {
+    const candidates = WORD_LIST_BY_LEN[len];
+    if (!candidates) continue;
+    for (const w of candidates) {
+      if (found.length >= count) break;
+      if (foundSet.has(w)) continue;
+      if (reqLo && !w.includes(reqLo)) continue;
+      const poolCopy = { ...pool };
+      let ok = true;
+      for (const ch of w) {
+        if (!poolCopy[ch] || poolCopy[ch] <= 0) { ok = false; break; }
+        poolCopy[ch]--;
+      }
+      if (ok) { found.push(w); foundSet.add(w); }
+    }
+  }
+  return found;
+}
+
+// 9 harften 9 harflik kelime uretebilen havuz olustur (final tur icin)
+function generateFinalLetters(maxTries = 50) {
+  if (!WORD_LIST_BY_LEN[9] || WORD_LIST_BY_LEN[9].length === 0) {
+    // 9 harf yoksa 8 harfle dene
+    if (!WORD_LIST_BY_LEN[8]) return null;
+    const word = WORD_LIST_BY_LEN[8][Math.floor(Math.random() * WORD_LIST_BY_LEN[8].length)];
+    const letters = [...word.toLocaleUpperCase('tr-TR')];
+    while (letters.length < 9) {
+      const isVowel = letters.filter(l => 'AEIIOOUU'.includes(l)).length / letters.length < 0.4;
+      letters.push(isVowel ? VOWELS[Math.floor(Math.random()*VOWELS.length)] : CONSONANTS[Math.floor(Math.random()*CONSONANTS.length)]);
+    }
+    shuffle(letters);
+    return { letters, answer: word };
+  }
+  const words9 = WORD_LIST_BY_LEN[9];
+  const word = words9[Math.floor(Math.random() * words9.length)];
+  const letters = [...word.toLocaleUpperCase('tr-TR')];
+  shuffle(letters);
+  return { letters, answer: word };
+}
+
 // =============================
 // ÇÖZÜLEBİLİR BULMACA
 // =============================
@@ -292,6 +343,7 @@ function createRoom(hostSocketId, password = '') {
       rounds: 6, timeLimitWord: 45, timeLimitMath: 60,
       jokersPerPlayer: 1, order: 'alternate', gameMode: 'mixed',
       preset: 'normal',
+      autoStart: false, finalRound: false,
     },
     state: 'lobby',
     currentRound: 0,
@@ -338,11 +390,12 @@ function getPublicState(room) {
     currentRound: room.currentRound,
     totalRounds: room.settings.rounds,
     roundType: room.currentData ? room.currentData.type : null,
-    letters: room.currentData && room.currentData.type === 'word' ? room.currentData.letters : null,
+    letters: room.currentData && (room.currentData.type === 'word' || room.currentData.type === 'final') ? room.currentData.letters : null,
     numbers: room.currentData && room.currentData.type === 'math' ? room.currentData.numbers : null,
     target: room.currentData && room.currentData.type === 'math' ? room.currentData.target : null,
     requiredLetter,
     isBonus,
+    isFinal: room.currentData && room.currentData.type === 'final',
     timeLeft: room.timeLeft,
     countdown: room.countdown,
     hostId: room.host,
@@ -367,7 +420,7 @@ function endRoundAnswering(code) {
 function startTimer(code) {
   const room = rooms[code];
   if (!room) return;
-  const limit = room.currentData.type === 'word' ? room.settings.timeLimitWord : room.settings.timeLimitMath;
+  const limit = (room.currentData.type === 'word' || room.currentData.type === 'final') ? room.settings.timeLimitWord : room.settings.timeLimitMath;
   room.timeLeft = limit;
   room.timerStartedAt = Date.now();
   room.state = 'playing';
@@ -383,21 +436,25 @@ function startTimer(code) {
 function planRounds(settings) {
   const plan = [];
   const mode = settings.gameMode || 'mixed';
+  const totalRounds = settings.rounds;
+  // Final tur aktifse son turu 'final' yap, geri kalanini normal dagit
+  const normalRounds = settings.finalRound ? totalRounds - 1 : totalRounds;
   if (mode === 'word-only') {
-    for (let i = 0; i < settings.rounds; i++) plan.push('word');
+    for (let i = 0; i < normalRounds; i++) plan.push('word');
   } else if (mode === 'math-only') {
-    for (let i = 0; i < settings.rounds; i++) plan.push('math');
+    for (let i = 0; i < normalRounds; i++) plan.push('math');
   } else {
     const order = settings.order;
     if (order === 'alternate') {
-      for (let i = 0; i < settings.rounds; i++) plan.push(i % 2 === 0 ? 'word' : 'math');
+      for (let i = 0; i < normalRounds; i++) plan.push(i % 2 === 0 ? 'word' : 'math');
     } else if (order === 'word-first') {
-      const half = Math.ceil(settings.rounds/2);
-      for (let i = 0; i < settings.rounds; i++) plan.push(i < half ? 'word' : 'math');
+      const half = Math.ceil(normalRounds/2);
+      for (let i = 0; i < normalRounds; i++) plan.push(i < half ? 'word' : 'math');
     } else {
-      for (let i = 0; i < settings.rounds; i++) plan.push(Math.random() < 0.5 ? 'word' : 'math');
+      for (let i = 0; i < normalRounds; i++) plan.push(Math.random() < 0.5 ? 'word' : 'math');
     }
   }
+  if (settings.finalRound) plan.push('final');
   return plan;
 }
 
@@ -412,13 +469,16 @@ function buildRoundData(room) {
   const type = room.rounds_plan[room.currentRound];
   if (type === 'word') {
     const letters = randomLetters(9);
-    // Bazı turlarda zorunlu harf koy (her 3 turda 1)
     let requiredLetter = null;
     if ((room.currentRound + 1) % 3 === 0) {
-      // havuzdan rastgele bir harf seç
       requiredLetter = letters[Math.floor(Math.random() * letters.length)];
     }
     return { type: 'word', letters, requiredLetter };
+  } else if (type === 'final') {
+    // Final tur: 9 harften 9 harflik kelime
+    const fin = generateFinalLetters();
+    if (!fin) return { type: 'word', letters: randomLetters(9), requiredLetter: null };
+    return { type: 'final', letters: fin.letters, expectedAnswer: fin.answer };
   } else {
     return { type: 'math', ...randomMathPuzzle() };
   }
@@ -433,10 +493,16 @@ function setupNextRound(code) {
   room.answers = {};
   room.answerTimes = {};
   room.state = 'ready';
-  const limit = room.currentData.type === 'word' ? room.settings.timeLimitWord : room.settings.timeLimitMath;
+  const limit = (room.currentData.type === 'word' || room.currentData.type === 'final') ? room.settings.timeLimitWord : room.settings.timeLimitMath;
   room.timeLeft = limit;
   room.countdown = null;
   broadcastRoom(code);
+  // autoStart aktifse 3 saniye sonra timer'i baslat
+  if (room.settings.autoStart) {
+    setTimeout(() => {
+      if (rooms[code] && rooms[code].state === 'ready') startTimer(code);
+    }, 3000);
+  }
 }
 
 function startCountdown(code) {
@@ -470,7 +536,7 @@ function startCountdown(code) {
       room.answers = {};
       room.answerTimes = {};
       room.state = 'ready';
-      const limit = room.currentData.type === 'word' ? room.settings.timeLimitWord : room.settings.timeLimitMath;
+      const limit = (room.currentData.type === 'word' || room.currentData.type === 'final') ? room.settings.timeLimitWord : room.settings.timeLimitMath;
       room.timeLeft = limit;
       broadcastRoom(code);
       setTimeout(() => startTimer(code), 100);
@@ -527,7 +593,8 @@ function computeResults(room) {
   let bestAnswer = null;
   const requiredLetter = room.currentData.requiredLetter;
 
-  if (isWord) {
+  const isFinal = room.currentData.type === 'final';
+  if (isWord || isFinal) {
     bestAnswer = findLongestPossibleWord(room.currentData.letters, requiredLetter);
     // En hızlı zaman
     let fastestTime = Infinity;
@@ -560,8 +627,13 @@ function computeResults(room) {
       }
       pts += speedBonus;
       if (isBonus && pts > 0) pts *= 2;
+      // Final tur bonus: 9 harflik tam dogru kelime ise +5
+      if (isFinal && ans && ans.word && [...ans.word].length === 9 && ans.tdkValid === true) {
+        pts += 5;
+        info.finalBonus = true;
+      }
       p.score += pts;
-      results.push({ id: p.id, name: p.name, points: pts, speedBonus, isBonus, ...info });
+      results.push({ id: p.id, name: p.name, points: pts, speedBonus, isBonus, isFinal, ...info });
     });
   } else {
     const target = room.currentData.target;
@@ -594,7 +666,11 @@ function computeResults(room) {
       results.push({ id: p.id, name: p.name, points: pts, speedBonus, isBonus, ...info });
     });
   }
-  return { results, bestAnswer, requiredLetter, isBonus };
+  let topWords = null;
+  if (isWord || isFinal) {
+    topWords = findTopWords(room.currentData.letters, requiredLetter, 3);
+  }
+  return { results, bestAnswer, requiredLetter, isBonus, isFinal, topWords };
 }
 
 // =============================
@@ -691,6 +767,8 @@ io.on('connection', (socket) => {
     }
     if (settings.order) room.settings.order = settings.order;
     if (settings.gameMode) room.settings.gameMode = settings.gameMode;
+    if (settings.autoStart !== undefined) room.settings.autoStart = !!settings.autoStart;
+    if (settings.finalRound !== undefined) room.settings.finalRound = !!settings.finalRound;
     broadcastRoom(code);
   });
 
@@ -787,23 +865,34 @@ io.on('connection', (socket) => {
     const room = rooms[code];
     if (!room || room.host !== socket.id) return;
     if (room.state !== 'answering') return;
-    const { results, bestAnswer, requiredLetter, isBonus } = computeResults(room);
+    const { results, bestAnswer, requiredLetter, isBonus, isFinal, topWords } = computeResults(room);
     room.state = 'results';
     room.lastResults = results;
+    // Tur ozet emojisi belirle
+    const allScored = results.every(r => r.points > 0);
+    const noneScored = results.every(r => r.points === 0);
+    const someTopScore = Math.max(...results.map(r => r.points));
+    let roundEmoji = '👍';
+    if (noneScored) roundEmoji = '💀';
+    else if (allScored && someTopScore >= 10) roundEmoji = '🔥';
+    else if (allScored) roundEmoji = '🎯';
+    else if (someTopScore >= 12) roundEmoji = '⭐';
+    else if (someTopScore <= 2) roundEmoji = '🥶';
+    if (isFinal) roundEmoji = '🏁';
     const histEntry = {
       roundNum: room.currentRound + 1,
       roundType: room.currentData.type,
       target: room.currentData.target,
       letters: room.currentData.letters,
       numbers: room.currentData.numbers,
-      requiredLetter, isBonus,
+      requiredLetter, isBonus, isFinal, roundEmoji, topWords,
       bestAnswer,
-      results: results.map(r => ({ name: r.name, points: r.points, word: r.word, result: r.result, expression: r.expression })),
+      results: results.map(r => ({ name: r.name, points: r.points, word: r.word, result: r.result, expression: r.expression, finalBonus: r.finalBonus })),
     };
     room.roundHistory.push(histEntry);
     io.to(code).emit('round_results', {
       results, roundType: room.currentData.type, target: room.currentData.target,
-      bestAnswer, requiredLetter, isBonus,
+      bestAnswer, requiredLetter, isBonus, isFinal, topWords, roundEmoji,
       scoreboard: room.players.map(p => ({ id: p.id, name: p.name, avatar: p.avatar, score: p.score })).sort((a,b) => b.score - a.score),
     });
     broadcastRoom(code);
