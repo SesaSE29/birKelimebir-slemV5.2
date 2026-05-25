@@ -517,7 +517,7 @@
       <div class="field" style="margin-top:8px;">
         <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
           <input type="checkbox" id="setting-finalround" style="width:auto;margin:0;" onchange="sendSettings()">
-          <span>🏁 Final tur <span style="color:var(--muted);font-size:0.8rem;">(son tur: 9 harfli kelime, +5 bonus)</span></span>
+          <span>🏁 Final tur <span style="color:var(--muted);font-size:0.8rem;">(son tur: ilk 9 harfli TDK kelime bulan +5 kapar)</span></span>
         </label>
       </div>
       <button class="btn big" onclick="startGame()">Oyunu Başlat ▶</button>
@@ -1258,12 +1258,41 @@ function renderByState(prevState) {
     $('lobby-code').textContent = roomState.code;
     $('lobby-url').textContent = location.origin + '/?code=' + roomState.code;
     $('lobby-pass-info').style.display = roomState.hasPassword ? '' : 'none';
+    // Final tur bilgisi
+    let finalInfo = document.getElementById('lobby-final-info');
+    if (!finalInfo) {
+      finalInfo = document.createElement('div');
+      finalInfo.id = 'lobby-final-info';
+      finalInfo.style.cssText = 'text-align:center;color:var(--gold);font-family:JetBrains Mono,monospace;font-size:0.85rem;margin-top:8px;padding:6px;background:rgba(245,197,66,0.1);border-radius:6px;border:1px solid var(--gold);';
+      const passInfo = document.getElementById('lobby-pass-info');
+      if (passInfo) passInfo.parentNode.insertBefore(finalInfo, passInfo.nextSibling);
+    }
+    finalInfo.style.display = roomState.settings.finalRound ? '' : 'none';
+    finalInfo.textContent = '🏁 Final tur aktif (son tur)';
     renderLobbyPlayers();
     if (isHost) {
       $('host-settings').style.display = '';
       $('guest-wait').style.display = 'none';
-      // Ayar sayfasi sadece goruntuleniyor, user interaction'da room_state feedback'i bozmasin
-      // Hicbir select'e dokunma - kullanici neyle ugrasiyorsa o oradadir
+      // Sadece focus'ta DEGIL elemanlari guncelle (yazi yazarken bozulmasin)
+      const active = document.activeElement;
+      function safeSetVal(id, val) {
+        const el = document.getElementById(id);
+        if (!el || el === active) return;
+        const str = String(val);
+        if (el.value !== str) el.value = str;
+      }
+      function safeSetCheck(id, val) {
+        const el = document.getElementById(id);
+        if (!el || el === active) return;
+        if (el.checked !== !!val) el.checked = !!val;
+      }
+      safeSetVal('setting-rounds', roomState.settings.rounds);
+      safeSetVal('setting-time-word', roomState.settings.timeLimitWord);
+      safeSetVal('setting-time-math', roomState.settings.timeLimitMath);
+      safeSetVal('setting-joker', roomState.settings.jokersPerPlayer);
+      safeSetVal('setting-order', roomState.settings.order);
+      safeSetVal('setting-mode', roomState.settings.gameMode || 'mixed');
+      safeSetCheck('setting-finalround', roomState.settings.finalRound);
     } else {
       $('host-settings').style.display = 'none';
       $('guest-wait').style.display = '';
