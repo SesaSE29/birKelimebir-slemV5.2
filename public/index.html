@@ -402,7 +402,6 @@
       <ul>
         <li><b>Bir Kelime:</b> 9 harften en uzun Türkçe kelime. Bazı turlarda 1 harfin zorunlu olduğu görülür (mor halka). Joker: -2 pt, TDK ✗: 0 pt.</li>
         <li><b>Bir İşlem:</b> Parantez kullanabilirsin. Yaklaşana da puan (1f=8, 2f=6, ..., 11-20f=1).</li>
-        <li><b>Hızlı cevap:</b> İlk 10 saniyede gönderirsen +2 puan.</li>
         <li><b>Bonus Tur:</b> Oyunun ortasında 1 turda puanlar x2.</li>
       </ul>
     </div>
@@ -1062,9 +1061,24 @@ function hostForceEnd() { if (isHost) socket.emit('force_end_round'); }
 function hostShowResults() { if (isHost) socket.emit('show_results'); }
 function hostNextRound() {
   if (!isHost) return;
-  $('next-round-btn').disabled = true;
-  $('next-round-btn').textContent = 'Geçiliyor...';
-  socket.emit('next_round');
+  const btn = $('next-round-btn');
+  btn.disabled = true;
+  btn.textContent = 'Geçiliyor...';
+  socket.emit('next_round', null, (res) => {
+    if (res && !res.ok) {
+      notify('Sonraki tura geçilemedi: ' + (res.error || 'hata'), 'error');
+      btn.disabled = false;
+      btn.textContent = 'Sonraki Tur →';
+    }
+  });
+  // Safety timeout: 6 sn icinde state degismediyse butonu serbest birak
+  setTimeout(() => {
+    if (roomState && roomState.state === 'results' && btn.disabled) {
+      notify('Sunucudan yanıt gelmedi, tekrar dene', 'error');
+      btn.disabled = false;
+      btn.textContent = 'Sonraki Tur →';
+    }
+  }, 6000);
 }
 function hostRestart() { if (isHost) socket.emit('restart_lobby'); }
 function leaveAndHome() { location.href = '/'; }
@@ -1239,6 +1253,11 @@ function removeCountdown() {
 
 function renderByState(prevState) {
   if (!roomState) return;
+  // Safety: "Sonraki Tur" butonu sadece 'results' state'inde disabled kalabilir
+  if (roomState.state !== 'results') {
+    const nb = $('next-round-btn');
+    if (nb && nb.disabled) { nb.disabled = false; nb.textContent = 'Sonraki Tur →'; }
+  }
   if (roomState.state === 'countdown') {
     renderCountdown(roomState.countdown || 3);
     return;
@@ -1953,17 +1972,15 @@ socket.on('round_results', ({ results, roundType, target, bestAnswer, requiredLe
         detail = `${r.word ? '<span class="result-word" data-word="'+escapeHtml(r.word)+'" data-meaning-id="'+meaningId+'">'+escapeHtml(r.word)+'</span>' : '<i style="color:var(--muted)">—</i>'} ${badge}${lenInfo}${winnerB}`;
       } else {
         const j = r.jokerCount > 0 ? `<span class="badge joker">★${r.jokerCount}</span>` : '';
-        const speed = r.speedBonus > 0 ? '<span class="badge speed">⚡ +2</span>' : '';
         const bonus = r.isBonus && r.points > 0 ? '<span class="badge bonus">x2</span>' : '';
         const missing = r.missingRequired ? '<span class="badge no">⚠ zorunlu harf yok</span>' : '';
-        detail = `${r.word ? '<span class="result-word" data-word="'+escapeHtml(r.word)+'" data-meaning-id="'+meaningId+'">'+escapeHtml(r.word)+'</span>' : '<i style="color:var(--muted)">—</i>'} ${badge}${j}${speed}${bonus}${missing}`;
+        detail = `${r.word ? '<span class="result-word" data-word="'+escapeHtml(r.word)+'" data-meaning-id="'+meaningId+'">'+escapeHtml(r.word)+'</span>' : '<i style="color:var(--muted)">—</i>'} ${badge}${j}${bonus}${missing}`;
       }
     } else {
       if (r.result !== undefined) {
         const exprTxt = r.expression || '';
-        const speed = r.speedBonus > 0 ? '<span class="badge speed">⚡ +2</span>' : '';
         const bonus = r.isBonus && r.points > 0 ? '<span class="badge bonus">x2</span>' : '';
-        detail = `${r.result} ${r.diff === 0 ? '🎯' : '(fark:'+r.diff+')'} ${speed}${bonus} <span style="color:var(--muted);font-size:0.8em;">${escapeHtml(exprTxt)}</span>`;
+        detail = `${r.result} ${r.diff === 0 ? '🎯' : '(fark:'+r.diff+')'} ${bonus} <span style="color:var(--muted);font-size:0.8em;">${escapeHtml(exprTxt)}</span>`;
       } else detail = '<i style="color:var(--muted)">(boş)</i>';
     }
     row.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;width:100%;"><span><b>${escapeHtml(r.name)}:</b> ${detail}</span><span class="pts">+${r.points}</span></div>`;

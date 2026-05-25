@@ -592,23 +592,14 @@ function computeResults(room) {
     });
   } else if (isWord) {
     bestAnswer = findLongestPossibleWord(room.currentData.letters, requiredLetter);
-    // En hızlı zaman
-    let fastestTime = Infinity;
-    room.players.forEach(p => {
-      const t = room.answerTimes[p.id];
-      if (t !== undefined && t < fastestTime) fastestTime = t;
-    });
     room.players.forEach(p => {
       const ans = room.answers[p.id];
       let pts = 0, info = {};
-      let speedBonus = 0;
       if (ans && ans.word && !ans.empty) {
         const reqOk = !requiredLetter || ans.word.toLocaleLowerCase('tr-TR').includes(requiredLetter.toLocaleLowerCase('tr-TR'));
         if (ans.tdkValid === true && reqOk) {
           pts = wordScore(ans.word.length) - (ans.jokerCount || 0) * 2;
           if (pts < 0) pts = 0;
-          const t = room.answerTimes[p.id];
-          if (t !== undefined && t <= 10000) speedBonus = 2;
         }
         info = {
           word: ans.word, tdkValid: ans.tdkValid, tdkUnknown: ans.tdkUnknown,
@@ -619,10 +610,9 @@ function computeResults(room) {
           p.jokersLeft = Math.max(0, p.jokersLeft - ans.jokerCount);
         }
       }
-      pts += speedBonus;
       if (isBonus && pts > 0) pts *= 2;
       p.score += pts;
-      results.push({ id: p.id, name: p.name, points: pts, speedBonus, isBonus, ...info });
+      results.push({ id: p.id, name: p.name, points: pts, isBonus, ...info });
     });
   } else {
     const target = room.currentData.target;
@@ -638,21 +628,16 @@ function computeResults(room) {
     room.players.forEach(p => {
       const ans = room.answers[p.id];
       let pts = 0, info = {};
-      let speedBonus = 0;
       if (ans && ans.result !== undefined && !ans.empty) {
         const diff = Math.abs(ans.result - target);
         const isClosest = diff === minDiff;
         pts = mathScore(diff);
         if (isClosest && diff > 0 && diff <= 20) pts += 1;
-        // Hızlı bonus
-        const t = room.answerTimes[p.id];
-        if (t !== undefined && t <= 10000 && pts > 0) speedBonus = 2;
         info = { result: ans.result, diff, expression: ans.expression || '' };
       }
-      pts += speedBonus;
       if (isBonus && pts > 0) pts *= 2;
       p.score += pts;
-      results.push({ id: p.id, name: p.name, points: pts, speedBonus, isBonus, ...info });
+      results.push({ id: p.id, name: p.name, points: pts, isBonus, ...info });
     });
   }
   let topWords = null;
@@ -893,11 +878,14 @@ io.on('connection', (socket) => {
     endRoundAnswering(code);
   });
 
-  socket.on('next_round', () => {
+  socket.on('next_round', (_, cb) => {
     const code = socket.data.roomCode;
     const room = rooms[code];
-    if (!room || room.host !== socket.id) return;
-    if (room.state !== 'results') return;
+    if (!room) { console.log('[next_round] oda yok'); return cb && cb({ ok: false, error: 'oda yok' }); }
+    if (room.host !== socket.id) { console.log('[next_round] host degil', code); return cb && cb({ ok: false, error: 'host degil' }); }
+    if (room.state !== 'results') { console.log('[next_round] yanlis state', code, 'state=' + room.state); return cb && cb({ ok: false, error: 'state: ' + room.state }); }
+    console.log('[next_round]', code, 'curRound=' + room.currentRound);
+    cb && cb({ ok: true });
     startCountdown(code);
   });
 
