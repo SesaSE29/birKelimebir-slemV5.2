@@ -1055,6 +1055,22 @@ const PRESET_LIMITS = {
   marathon: { rounds: [7,8,10,15,20], wordTimes: [20,30,45,60,90], mathTimes: [25,45,60,90,120], locked: false },
 };
 
+function sendSettings() {
+  if (!isHost) return;
+  const payload = {
+    rounds: document.getElementById('setting-rounds').value,
+    timeLimitWord: document.getElementById('setting-time-word').value,
+    timeLimitMath: document.getElementById('setting-time-math').value,
+    jokersPerPlayer: document.getElementById('setting-joker').value,
+    order: document.getElementById('setting-order').value,
+    gameMode: document.getElementById('setting-mode').value,
+    autoStart: document.getElementById('setting-autostart') ? document.getElementById('setting-autostart').checked : false,
+    finalRound: document.getElementById('setting-finalround') ? document.getElementById('setting-finalround').checked : false,
+  };
+  console.log('[sendSettings]', payload);
+  socket.emit('update_settings', payload);
+}
+
 function startGame() { if (isHost) socket.emit('start_game'); }
 function hostStartTimer() { if (isHost) { ensureAudio(); socket.emit('start_timer'); } }
 function hostForceEnd() { if (isHost) socket.emit('force_end_round'); }
