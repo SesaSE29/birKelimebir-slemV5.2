@@ -487,7 +487,8 @@ function startCountdown(code) {
   if (!room) return;
   if (room.countdownInterval) clearInterval(room.countdownInterval);
   const nextRoundNum = room.currentRound + 1;
-  if (nextRoundNum >= room.settings.rounds) {
+  const totalPlanned = (room.rounds_plan && room.rounds_plan.length) || room.settings.rounds;
+  if (nextRoundNum >= totalPlanned) {
     room.state = 'finished';
     const ranked = [...room.players].sort((a,b) => b.score - a.score);
     // Rozetleri hesapla
@@ -516,12 +517,10 @@ function startCountdown(code) {
       const limit = (room.currentData.type === 'word' || room.currentData.type === 'final') ? room.settings.timeLimitWord : room.settings.timeLimitMath;
       room.timeLeft = limit;
       broadcastRoom(code);
-      // autoStart aktifse 3sn sonra otomatik basla; degilse host butona basacak
-      if (room.settings.autoStart) {
-        setTimeout(() => {
-          if (rooms[code] && rooms[code].state === 'ready') startTimer(code);
-        }, 3000);
-      }
+      // Geri sayim sonra her zaman otomatik timer baslat (eski davranis)
+      setTimeout(() => {
+        if (rooms[code] && rooms[code].state === 'ready') startTimer(code);
+      }, 100);
     } else {
       io.to(code).emit('countdown_tick', { countdown: room.countdown });
     }
@@ -576,7 +575,53 @@ function computeResults(room) {
   const requiredLetter = room.currentData.requiredLetter;
 
   const isFinal = room.currentData.type === 'final';
-  if (isWord || isFinal) {
+  if (isFinal) {
+    // === FINAL TUR ===
+    // Kural: Sadece 9 harflik TDK ✓ kelime bulan EN HIZLI oyuncu +5 alir
+    // Digerleri 0 puan. Normal kelime puani YOK.
+    bestAnswer = findLongestPossibleWord(room.currentData.letters, null);
+    
+    // 9 harflik TDK ✓ verenleri ve sürelerini topla
+    const validFinalists = [];
+    room.players.forEach(p => {
+      const ans = room.answers[p.id];
+      if (!ans || ans.empty || !ans.word) return;
+      const wordLen = Array.from(ans.word).length;
+      console.log('[FINAL CHECK]', p.name, ans.word, 'len=' + wordLen, 'tdk=' + ans.tdkValid);
+      if (wordLen === 9 && ans.tdkValid === true) {
+        validFinalists.push({ id: p.id, time: room.answerTimes[p.id] !== undefined ? room.answerTimes[p.id] : Infinity });
+      }
+    });
+    
+    // En hizliyi bul
+    let winnerId = null;
+    if (validFinalists.length > 0) {
+      validFinalists.sort((a, b) => a.time - b.time);
+      winnerId = validFinalists[0].id;
+      console.log('[FINAL WINNER]', winnerId, validFinalists[0].time + 'ms');
+    }
+    
+    // Sonuclari olustur
+    room.players.forEach(p => {
+      const ans = room.answers[p.id];
+      let pts = 0, info = {};
+      if (ans && ans.word) {
+        info = {
+          word: ans.word,
+          tdkValid: ans.tdkValid,
+          tdkUnknown: ans.tdkUnknown,
+          jokerCount: ans.jokerCount || 0,
+        };
+      }
+      if (p.id === winnerId) {
+        pts = 5;
+        info.finalBonus = true;
+        info.finalWinner = true;
+      }
+      p.score += pts;
+      results.push({ id: p.id, name: p.name, points: pts, isFinal: true, ...info });
+    });
+  } else if (isWord) {
     bestAnswer = findLongestPossibleWord(room.currentData.letters, requiredLetter);
     // En hızlı zaman
     let fastestTime = Infinity;
@@ -589,12 +634,10 @@ function computeResults(room) {
       let pts = 0, info = {};
       let speedBonus = 0;
       if (ans && ans.word && !ans.empty) {
-        // Zorunlu harf kontrolü
         const reqOk = !requiredLetter || ans.word.toLocaleLowerCase('tr-TR').includes(requiredLetter.toLocaleLowerCase('tr-TR'));
         if (ans.tdkValid === true && reqOk) {
           pts = wordScore(ans.word.length) - (ans.jokerCount || 0) * 2;
           if (pts < 0) pts = 0;
-          // Hızlı cevap bonusu
           const t = room.answerTimes[p.id];
           if (t !== undefined && t <= 10000) speedBonus = 2;
         }
@@ -609,13 +652,8 @@ function computeResults(room) {
       }
       pts += speedBonus;
       if (isBonus && pts > 0) pts *= 2;
-      // Final tur bonus: 9 harflik tam dogru kelime ise +5
-      if (isFinal && ans && ans.word && [...ans.word].length === 9 && ans.tdkValid === true) {
-        pts += 5;
-        info.finalBonus = true;
-      }
       p.score += pts;
-      results.push({ id: p.id, name: p.name, points: pts, speedBonus, isBonus, isFinal, ...info });
+      results.push({ id: p.id, name: p.name, points: pts, speedBonus, isBonus, ...info });
     });
   } else {
     const target = room.currentData.target;

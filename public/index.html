@@ -516,12 +516,6 @@
       </div>
       <div class="field" style="margin-top:8px;">
         <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
-          <input type="checkbox" id="setting-autostart" style="width:auto;margin:0;" onchange="sendSettings()">
-          <span>Otomatik tur başlatma <span style="color:var(--muted);font-size:0.8rem;">(her tur 3sn sonra otomatik başlasın)</span></span>
-        </label>
-      </div>
-      <div class="field">
-        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
           <input type="checkbox" id="setting-finalround" style="width:auto;margin:0;" onchange="sendSettings()">
           <span>🏁 Final tur <span style="color:var(--muted);font-size:0.8rem;">(son tur: 9 harfli kelime, +5 bonus)</span></span>
         </label>
@@ -1064,7 +1058,6 @@ function sendSettings() {
     jokersPerPlayer: document.getElementById('setting-joker').value,
     order: document.getElementById('setting-order').value,
     gameMode: document.getElementById('setting-mode').value,
-    autoStart: document.getElementById('setting-autostart') ? document.getElementById('setting-autostart').checked : false,
     finalRound: document.getElementById('setting-finalround') ? document.getElementById('setting-finalround').checked : false,
   };
   console.log('[sendSettings]', payload);
@@ -1325,7 +1318,7 @@ let lastRoundData = null;
 function renderGameRound(prevState) {
   $('round-label').textContent = `Tur ${roomState.currentRound + 1} / ${roomState.totalRounds}`;
   if (roomState.roundType === 'final') {
-    $('round-type-label').textContent = '🏁 FİNAL TURU — 9 Harfli Kelime (+5 bonus)';
+    $('round-type-label').textContent = '🏁 FİNAL — İlk 9 harfli TDK kelime bulan +5 KAPAR!';
   } else {
     $('round-type-label').textContent = roomState.roundType === 'word' ? '🔤 Bir Kelime' : '🔢 Bir İşlem';
   }
@@ -1930,13 +1923,20 @@ socket.on('round_results', ({ results, roundType, target, bestAnswer, requiredLe
       if (r.tdkValid) badge = '<span class="badge ok">TDK ✓</span>';
       else if (r.tdkUnknown) badge = '<span class="badge unk">TDK ?</span>';
       else if (r.word) badge = '<span class="badge no">TDK ✗</span>';
-      const j = r.jokerCount > 0 ? `<span class="badge joker">★${r.jokerCount}</span>` : '';
-      const speed = r.speedBonus > 0 ? '<span class="badge speed">⚡ +2</span>' : '';
-      const bonus = r.isBonus && r.points > 0 ? '<span class="badge bonus">x2</span>' : '';
-      const missing = r.missingRequired ? '<span class="badge no">⚠ zorunlu harf yok</span>' : '';
-      const finalB = r.finalBonus ? '<span class="badge bonus">🏁 +5</span>' : '';
+      const wordLen = r.word ? Array.from(r.word).length : 0;
+      const lenInfo = isFinal && r.word ? `<span class="badge ${wordLen === 9 ? 'ok' : 'no'}">${wordLen} harf</span>` : '';
+      const winnerB = r.finalWinner ? '<span class="badge bonus">🏁 İLK BULAN +5</span>' : '';
       const meaningId = r.word ? 'meaning-' + (r.word.toLowerCase().replace(/[^a-z]/g,'')) + '-' + Math.random().toString(36).slice(2,6) : '';
-      detail = `${r.word ? '<span class="result-word" data-word="'+escapeHtml(r.word)+'" data-meaning-id="'+meaningId+'">'+escapeHtml(r.word)+'</span>' : '<i style="color:var(--muted)">—</i>'} ${badge}${j}${speed}${bonus}${missing}${finalB}`;
+      // Final tur'da joker/speed/x2/required badge'leri YOK (sadece 9 harf + TDK + winner)
+      if (isFinal) {
+        detail = `${r.word ? '<span class="result-word" data-word="'+escapeHtml(r.word)+'" data-meaning-id="'+meaningId+'">'+escapeHtml(r.word)+'</span>' : '<i style="color:var(--muted)">—</i>'} ${badge}${lenInfo}${winnerB}`;
+      } else {
+        const j = r.jokerCount > 0 ? `<span class="badge joker">★${r.jokerCount}</span>` : '';
+        const speed = r.speedBonus > 0 ? '<span class="badge speed">⚡ +2</span>' : '';
+        const bonus = r.isBonus && r.points > 0 ? '<span class="badge bonus">x2</span>' : '';
+        const missing = r.missingRequired ? '<span class="badge no">⚠ zorunlu harf yok</span>' : '';
+        detail = `${r.word ? '<span class="result-word" data-word="'+escapeHtml(r.word)+'" data-meaning-id="'+meaningId+'">'+escapeHtml(r.word)+'</span>' : '<i style="color:var(--muted)">—</i>'} ${badge}${j}${speed}${bonus}${missing}`;
+      }
     } else {
       if (r.result !== undefined) {
         const exprTxt = r.expression || '';
