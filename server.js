@@ -308,29 +308,6 @@ function generateRoomCode() {
 
 const rooms = {};
 
-const PRESETS = {
-  normal: { rounds: 6, timeLimitWord: 45, timeLimitMath: 60 },
-  duel: { rounds: 3, timeLimitWord: 30, timeLimitMath: 45, maxPlayers: 2, locked: true },
-  fast: { rounds: 6, timeLimitWord: 20, timeLimitMath: 25, maxTimeWord: 30, maxTimeMath: 30 },
-  marathon: { rounds: 20, timeLimitWord: 45, timeLimitMath: 60, minRounds: 7 },
-};
-
-// Preset bazlı limit kontrolü
-function clampSettings(settings, preset) {
-  const p = PRESETS[preset];
-  if (!p) return settings;
-  if (p.locked) {
-    settings.rounds = p.rounds;
-    settings.timeLimitWord = p.timeLimitWord;
-    settings.timeLimitMath = p.timeLimitMath;
-  }
-  if (p.maxTimeWord && settings.timeLimitWord > p.maxTimeWord) settings.timeLimitWord = p.maxTimeWord;
-  if (p.maxTimeMath && settings.timeLimitMath > p.maxTimeMath) settings.timeLimitMath = p.maxTimeMath;
-  if (p.minRounds && settings.rounds < p.minRounds) settings.rounds = p.minRounds;
-  if (p.maxRounds && settings.rounds > p.maxRounds) settings.rounds = p.maxRounds;
-  return settings;
-}
-
 function createRoom(hostSocketId, password = '') {
   let code;
   do { code = generateRoomCode(); } while (rooms[code]);
@@ -678,14 +655,10 @@ function computeResults(room) {
 // =============================
 io.on('connection', (socket) => {
 
-  socket.on('create_room', ({ name, avatar, password, preset }, cb) => {
+  socket.on('create_room', ({ name, avatar, password }, cb) => {
     const code = createRoom(socket.id, password || '');
     socket.join(code);
     const room = rooms[code];
-    if (preset && PRESETS[preset]) {
-      Object.assign(room.settings, PRESETS[preset]);
-      room.settings.preset = preset;
-    }
     room.players.push({
       id: socket.id,
       name: (name || 'Sunucu').slice(0, 20),
@@ -747,28 +720,31 @@ io.on('connection', (socket) => {
     const code = socket.data.roomCode;
     const room = rooms[code];
     if (!room || room.host !== socket.id || room.state !== 'lobby') return;
-    if (settings.preset && PRESETS[settings.preset]) {
-      const pSet = PRESETS[settings.preset];
-      // Sadece preset değerlerini set et (locked, maxTime gibi meta'lar settings'e gitmesin)
-      if (pSet.rounds) room.settings.rounds = pSet.rounds;
-      if (pSet.timeLimitWord) room.settings.timeLimitWord = pSet.timeLimitWord;
-      if (pSet.timeLimitMath) room.settings.timeLimitMath = pSet.timeLimitMath;
-      room.settings.preset = settings.preset;
+    // Tum ayarlari dogrudan uygula, hicbir override yok
+    if (settings.rounds !== undefined) {
+      const r = parseInt(settings.rounds);
+      if (!isNaN(r) && r >= 2 && r <= 50) room.settings.rounds = r;
     }
-    const currentPreset = room.settings.preset || 'normal';
-    if (settings.rounds) room.settings.rounds = parseInt(settings.rounds);
-    if (settings.timeLimitWord) room.settings.timeLimitWord = parseInt(settings.timeLimitWord);
-    if (settings.timeLimitMath) room.settings.timeLimitMath = parseInt(settings.timeLimitMath);
-    // Limitleri uygula
-    clampSettings(room.settings, currentPreset);
+    if (settings.timeLimitWord !== undefined) {
+      const t = parseInt(settings.timeLimitWord);
+      if (!isNaN(t) && t >= 10 && t <= 300) room.settings.timeLimitWord = t;
+    }
+    if (settings.timeLimitMath !== undefined) {
+      const t = parseInt(settings.timeLimitMath);
+      if (!isNaN(t) && t >= 10 && t <= 300) room.settings.timeLimitMath = t;
+    }
     if (settings.jokersPerPlayer !== undefined) {
-      room.settings.jokersPerPlayer = parseInt(settings.jokersPerPlayer);
-      room.players.forEach(p => p.jokersLeft = room.settings.jokersPerPlayer);
+      const j = parseInt(settings.jokersPerPlayer);
+      if (!isNaN(j) && j >= 0 && j <= 5) {
+        room.settings.jokersPerPlayer = j;
+        room.players.forEach(p => p.jokersLeft = j);
+      }
     }
     if (settings.order) room.settings.order = settings.order;
     if (settings.gameMode) room.settings.gameMode = settings.gameMode;
     if (settings.autoStart !== undefined) room.settings.autoStart = !!settings.autoStart;
     if (settings.finalRound !== undefined) room.settings.finalRound = !!settings.finalRound;
+    console.log('[update_settings]', code, room.settings);
     broadcastRoom(code);
   });
 
@@ -798,6 +774,7 @@ io.on('connection', (socket) => {
     room.rounds_plan = planRounds(room.settings);
     room.bonusRounds = planBonusRounds(room.settings.rounds);
     room.roundHistory = [];
+    console.log('[start_game]', code, 'settings:', room.settings, 'plan:', room.rounds_plan);
     setupNextRound(code);
   });
 

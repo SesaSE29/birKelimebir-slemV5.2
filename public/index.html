@@ -412,18 +412,9 @@
     <div class="card">
       <h2>Yeni Oda</h2>
       <div class="field">
-        <label>Oyun Şablonu</label>
-        <select id="preset-select" onchange="updatePresetPreview()">
-          <option value="normal" selected>Normal (6 tur, 2-8 kişi)</option>
-          <option value="duel">⚔ Düello (3 tur, 2 kişi, hızlı)</option>
-          <option value="fast">⚡ Hızlı Tur (kısa süreler)</option>
-          <option value="marathon">🏃 Maraton (20 tur)</option>
-        </select>
-        <div id="preset-preview" style="color:var(--muted);font-size:0.85rem;margin-top:8px;font-family:'JetBrains Mono',monospace;"></div>
-      </div>
-      <div class="field">
         <label>Oda Şifresi (opsiyonel)</label>
         <input type="text" id="room-pass" maxlength="20" placeholder="Boş bırakırsan herkes katılabilir">
+        <div style="color:var(--muted);font-size:0.85rem;margin-top:8px;">Oyun ayarlarını oda kurulduktan sonra lobby'de yapacaksın.</div>
       </div>
       <div class="controls">
         <button class="btn ghost" onclick="show('screen-home')">← Geri</button>
@@ -964,7 +955,6 @@ function getName() {
 function showCreateOptions() {
   if (!getName()) return;
   show('screen-create');
-  updatePresetPreview();
 }
 
 function showJoin() {
@@ -975,25 +965,13 @@ function showJoin() {
   if (c) $('room-code-input').value = c.toUpperCase();
 }
 
-function updatePresetPreview() {
-  const p = $('preset-select').value;
-  const map = {
-    normal: 'Standart oyun: 6 tur, kelime 45sn / işlem 60sn',
-    duel: '⚔ 2 kişiye özel: 3 tur hızlı düello (30sn/45sn)',
-    fast: '⚡ Hızlı tempo: 6 tur, kelime 20sn / işlem 25sn',
-    marathon: '🏃 Uzun maraton: 20 tur sürekli oyun',
-  };
-  $('preset-preview').textContent = map[p] || '';
-}
-
 function createRoom() {
   const name = $('player-name').value.trim();
   if (!name) { notify('İsim gir', 'error'); return; }
   myName = name;
   ensureAudio();
-  const preset = $('preset-select').value;
   const password = $('room-pass').value.trim();
-  socket.emit('create_room', { name, avatar: myAvatar, password, preset }, (res) => {
+  socket.emit('create_room', { name, avatar: myAvatar, password }, (res) => {
     if (res.ok) {
       roomCode = res.code;
       isHost = true;
