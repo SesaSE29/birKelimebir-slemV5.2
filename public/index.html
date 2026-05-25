@@ -517,7 +517,7 @@
       <div class="field" style="margin-top:8px;">
         <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
           <input type="checkbox" id="setting-finalround" style="width:auto;margin:0;" onchange="sendSettings()">
-          <span>🏁 Final tur <span style="color:var(--muted);font-size:0.8rem;">(son tur: ilk 9 harfli TDK kelime bulan +5 kapar)</span></span>
+          <span>🏁 Final tur <span style="color:var(--muted);font-size:0.8rem;">(+1 EKSTRA tur eklenir; 9 harflik TDK kelime bulan herkese +5)</span></span>
         </label>
       </div>
       <button class="btn big" onclick="startGame()">Oyunu Başlat ▶</button>
@@ -1041,14 +1041,6 @@ function copyShareLink() {
 
 
 
-// Preset bazlı select kısıtlamaları
-const PRESET_LIMITS = {
-  normal: { rounds: [3,4,6,8,10,20], wordTimes: [20,30,45,60,90], mathTimes: [25,45,60,90,120], locked: false },
-  duel: { rounds: [3], wordTimes: [30], mathTimes: [45], locked: true },
-  fast: { rounds: [3,4,6,8,10], wordTimes: [20,30], mathTimes: [25,30], locked: false },
-  marathon: { rounds: [7,8,10,15,20], wordTimes: [20,30,45,60,90], mathTimes: [25,45,60,90,120], locked: false },
-};
-
 function sendSettings() {
   if (!isHost) return;
   const payload = {
@@ -1268,7 +1260,7 @@ function renderByState(prevState) {
       if (passInfo) passInfo.parentNode.insertBefore(finalInfo, passInfo.nextSibling);
     }
     finalInfo.style.display = roomState.settings.finalRound ? '' : 'none';
-    finalInfo.textContent = '🏁 Final tur aktif (son tur)';
+    finalInfo.textContent = '🏁 Final tur aktif: tur sayısına +1 EKSTRA tur eklenir; 9 harf TDK bulan herkese +5';
     renderLobbyPlayers();
     if (isHost) {
       $('host-settings').style.display = '';
@@ -1347,7 +1339,7 @@ let lastRoundData = null;
 function renderGameRound(prevState) {
   $('round-label').textContent = `Tur ${roomState.currentRound + 1} / ${roomState.totalRounds}`;
   if (roomState.roundType === 'final') {
-    $('round-type-label').textContent = '🏁 FİNAL — İlk 9 harfli TDK kelime bulan +5 KAPAR!';
+    $('round-type-label').textContent = '🏁 FİNAL — 9 harflik TDK kelime bulana +5!';
   } else {
     $('round-type-label').textContent = roomState.roundType === 'word' ? '🔤 Bir Kelime' : '🔢 Bir İşlem';
   }
@@ -1954,7 +1946,7 @@ socket.on('round_results', ({ results, roundType, target, bestAnswer, requiredLe
       else if (r.word) badge = '<span class="badge no">TDK ✗</span>';
       const wordLen = r.word ? Array.from(r.word).length : 0;
       const lenInfo = isFinal && r.word ? `<span class="badge ${wordLen === 9 ? 'ok' : 'no'}">${wordLen} harf</span>` : '';
-      const winnerB = r.finalWinner ? '<span class="badge bonus">🏁 İLK BULAN +5</span>' : '';
+      const winnerB = r.finalScored ? '<span class="badge bonus">🏁 +5</span>' : '';
       const meaningId = r.word ? 'meaning-' + (r.word.toLowerCase().replace(/[^a-z]/g,'')) + '-' + Math.random().toString(36).slice(2,6) : '';
       // Final tur'da joker/speed/x2/required badge'leri YOK (sadece 9 harf + TDK + winner)
       if (isFinal) {

@@ -124,20 +124,10 @@ function findTopWords(letters, requiredLetter = null, count = 3) {
 }
 
 // 9 harften 9 harflik kelime uretebilen havuz olustur (final tur icin)
-function generateFinalLetters(maxTries = 50) {
-  if (!WORD_LIST_BY_LEN[9] || WORD_LIST_BY_LEN[9].length === 0) {
-    // 9 harf yoksa 8 harfle dene
-    if (!WORD_LIST_BY_LEN[8]) return null;
-    const word = WORD_LIST_BY_LEN[8][Math.floor(Math.random() * WORD_LIST_BY_LEN[8].length)];
-    const letters = [...word.toLocaleUpperCase('tr-TR')];
-    while (letters.length < 9) {
-      const isVowel = letters.filter(l => 'AEIIOOUU'.includes(l)).length / letters.length < 0.4;
-      letters.push(isVowel ? VOWELS[Math.floor(Math.random()*VOWELS.length)] : CONSONANTS[Math.floor(Math.random()*CONSONANTS.length)]);
-    }
-    shuffle(letters);
-    return { letters, answer: word };
-  }
+// Her zaman 9 harflik gercek TDK kelimesinden uretilir; baska fallback yok.
+function generateFinalLetters() {
   const words9 = WORD_LIST_BY_LEN[9];
+  if (!words9 || words9.length === 0) return null;
   const word = words9[Math.floor(Math.random() * words9.length)];
   const letters = [...word.toLocaleUpperCase('tr-TR')];
   shuffle(letters);
@@ -319,8 +309,7 @@ function createRoom(hostSocketId, password = '') {
     settings: {
       rounds: 6, timeLimitWord: 45, timeLimitMath: 60,
       jokersPerPlayer: 1, order: 'alternate', gameMode: 'mixed',
-      preset: 'normal',
-      autoStart: false, finalRound: false,
+      finalRound: false,
     },
     state: 'lobby',
     currentRound: 0,
@@ -352,6 +341,7 @@ function getPublicState(room) {
   if (room.currentData && room.currentData.type === 'word' && room.currentData.requiredLetter) {
     requiredLetter = room.currentData.requiredLetter;
   }
+  const totalRoundsWithFinal = room.settings.rounds + (room.settings.finalRound ? 1 : 0);
   return {
     code: room.code,
     hasPassword: !!room.password,
@@ -365,7 +355,7 @@ function getPublicState(room) {
       typing: p.typing || false,
     })),
     currentRound: room.currentRound,
-    totalRounds: room.settings.rounds,
+    totalRounds: totalRoundsWithFinal,
     roundType: room.currentData ? room.currentData.type : null,
     letters: room.currentData && (room.currentData.type === 'word' || room.currentData.type === 'final') ? room.currentData.letters : null,
     numbers: room.currentData && room.currentData.type === 'math' ? room.currentData.numbers : null,
@@ -414,21 +404,20 @@ function planRounds(settings) {
   const plan = [];
   const mode = settings.gameMode || 'mixed';
   const totalRounds = settings.rounds;
-  // Final tur aktifse son turu 'final' yap, geri kalanini normal dagit
-  const normalRounds = settings.finalRound ? totalRounds - 1 : totalRounds;
+  // Final tur EKSTRA olarak eklenir: normal turlar + 1 ekstra final
   if (mode === 'word-only') {
-    for (let i = 0; i < normalRounds; i++) plan.push('word');
+    for (let i = 0; i < totalRounds; i++) plan.push('word');
   } else if (mode === 'math-only') {
-    for (let i = 0; i < normalRounds; i++) plan.push('math');
+    for (let i = 0; i < totalRounds; i++) plan.push('math');
   } else {
     const order = settings.order;
     if (order === 'alternate') {
-      for (let i = 0; i < normalRounds; i++) plan.push(i % 2 === 0 ? 'word' : 'math');
+      for (let i = 0; i < totalRounds; i++) plan.push(i % 2 === 0 ? 'word' : 'math');
     } else if (order === 'word-first') {
-      const half = Math.ceil(normalRounds/2);
-      for (let i = 0; i < normalRounds; i++) plan.push(i < half ? 'word' : 'math');
+      const half = Math.ceil(totalRounds/2);
+      for (let i = 0; i < totalRounds; i++) plan.push(i < half ? 'word' : 'math');
     } else {
-      for (let i = 0; i < normalRounds; i++) plan.push(Math.random() < 0.5 ? 'word' : 'math');
+      for (let i = 0; i < totalRounds; i++) plan.push(Math.random() < 0.5 ? 'word' : 'math');
     }
   }
   if (settings.finalRound) plan.push('final');
@@ -453,8 +442,11 @@ function buildRoundData(room) {
     return { type: 'word', letters, requiredLetter };
   } else if (type === 'final') {
     const fin = generateFinalLetters();
-    console.log('[FINAL ROUND]', fin ? ('uretildi: ' + fin.answer) : 'BASARISIZ');
-    if (!fin) return { type: 'word', letters: randomLetters(9), requiredLetter: null };
+    if (!fin) {
+      console.log('[FINAL ROUND] BASARISIZ - 9 harflik kelime listesi henuz hazir degil, normal kelime turuna dusuldu');
+      return { type: 'word', letters: randomLetters(9), requiredLetter: null };
+    }
+    console.log('[FINAL ROUND] uretildi: ' + fin.answer + ' (' + fin.letters.join('') + ')');
     return { type: 'final', letters: fin.letters, expectedAnswer: fin.answer };
   } else {
     return { type: 'math', ...randomMathPuzzle() };
@@ -474,12 +466,6 @@ function setupNextRound(code) {
   room.timeLeft = limit;
   room.countdown = null;
   broadcastRoom(code);
-  // autoStart aktifse 3 saniye sonra timer'i baslat
-  if (room.settings.autoStart) {
-    setTimeout(() => {
-      if (rooms[code] && rooms[code].state === 'ready') startTimer(code);
-    }, 3000);
-  }
 }
 
 function startCountdown(code) {
@@ -581,42 +567,25 @@ function computeResults(room) {
     // Digerleri 0 puan. Normal kelime puani YOK.
     bestAnswer = findLongestPossibleWord(room.currentData.letters, null);
     
-    // 9 harflik TDK ✓ verenleri ve sürelerini topla
-    const validFinalists = [];
-    room.players.forEach(p => {
-      const ans = room.answers[p.id];
-      if (!ans || ans.empty || !ans.word) return;
-      const wordLen = Array.from(ans.word).length;
-      console.log('[FINAL CHECK]', p.name, ans.word, 'len=' + wordLen, 'tdk=' + ans.tdkValid);
-      if (wordLen === 9 && ans.tdkValid === true) {
-        validFinalists.push({ id: p.id, time: room.answerTimes[p.id] !== undefined ? room.answerTimes[p.id] : Infinity });
-      }
-    });
-    
-    // En hizliyi bul
-    let winnerId = null;
-    if (validFinalists.length > 0) {
-      validFinalists.sort((a, b) => a.time - b.time);
-      winnerId = validFinalists[0].id;
-      console.log('[FINAL WINNER]', winnerId, validFinalists[0].time + 'ms');
-    }
-    
-    // Sonuclari olustur
+    // 9 harflik TDK ✓ kelime gönderen HERKES +5 alir (yaris yok)
     room.players.forEach(p => {
       const ans = room.answers[p.id];
       let pts = 0, info = {};
       if (ans && ans.word) {
+        const wordLen = Array.from(ans.word).length;
+        console.log('[FINAL CHECK]', p.name, ans.word, 'len=' + wordLen, 'tdk=' + ans.tdkValid);
         info = {
           word: ans.word,
           tdkValid: ans.tdkValid,
           tdkUnknown: ans.tdkUnknown,
           jokerCount: ans.jokerCount || 0,
         };
-      }
-      if (p.id === winnerId) {
-        pts = 5;
-        info.finalBonus = true;
-        info.finalWinner = true;
+        if (wordLen === 9 && ans.tdkValid === true) {
+          pts = 5;
+          info.finalBonus = true;
+          info.finalScored = true;
+          console.log('[FINAL +5]', p.name);
+        }
       }
       p.score += pts;
       results.push({ id: p.id, name: p.name, points: pts, isFinal: true, ...info });
@@ -736,8 +705,7 @@ io.on('connection', (socket) => {
       }
       return cb({ ok: false, error: 'Oyun başladı, yeni oyuncu eklenemez' });
     }
-    const maxP = (room.settings.preset === 'duel') ? 2 : 8;
-    if (room.players.length >= maxP) return cb({ ok: false, error: `Oda dolu (max ${maxP})` });
+    if (room.players.length >= 8) return cb({ ok: false, error: 'Oda dolu (max 8)' });
     const cleanName = (name || 'Oyuncu').slice(0, 20).trim() || 'Oyuncu';
     if (room.players.some(p => p.name.toLowerCase() === cleanName.toLowerCase())) {
       return cb({ ok: false, error: 'Bu isim alınmış' });
@@ -785,7 +753,6 @@ io.on('connection', (socket) => {
     }
     if (settings.order) room.settings.order = settings.order;
     if (settings.gameMode) room.settings.gameMode = settings.gameMode;
-    if (settings.autoStart !== undefined) room.settings.autoStart = !!settings.autoStart;
     if (settings.finalRound !== undefined) room.settings.finalRound = !!settings.finalRound;
     console.log('[update_settings]', code, room.settings);
     broadcastRoom(code);
