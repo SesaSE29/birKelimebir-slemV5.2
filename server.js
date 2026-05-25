@@ -452,8 +452,8 @@ function buildRoundData(room) {
     }
     return { type: 'word', letters, requiredLetter };
   } else if (type === 'final') {
-    // Final tur: 9 harften 9 harflik kelime
     const fin = generateFinalLetters();
+    console.log('[FINAL ROUND]', fin ? ('uretildi: ' + fin.answer) : 'BASARISIZ');
     if (!fin) return { type: 'word', letters: randomLetters(9), requiredLetter: null };
     return { type: 'final', letters: fin.letters, expectedAnswer: fin.answer };
   } else {
@@ -516,7 +516,12 @@ function startCountdown(code) {
       const limit = (room.currentData.type === 'word' || room.currentData.type === 'final') ? room.settings.timeLimitWord : room.settings.timeLimitMath;
       room.timeLeft = limit;
       broadcastRoom(code);
-      setTimeout(() => startTimer(code), 100);
+      // autoStart aktifse 3sn sonra otomatik basla; degilse host butona basacak
+      if (room.settings.autoStart) {
+        setTimeout(() => {
+          if (rooms[code] && rooms[code].state === 'ready') startTimer(code);
+        }, 3000);
+      }
     } else {
       io.to(code).emit('countdown_tick', { countdown: room.countdown });
     }
